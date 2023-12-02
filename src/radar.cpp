@@ -31,28 +31,25 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr create_radar_pc(Mat img)
     
     /*TODO : Transform Polar Image to Cartisien Pointcloud*/
     double PI = 3.1415926;
-    int row = img.rows;
-    int col = img.cols;
-    // ROS_INFO("%d",row); //2586
-    // ROS_INFO("%d",col); //400
+    int row = img.rows; //2586
+    int col = img.cols; //400
+    // ROS_INFO("%d",row); 
+    // ROS_INFO("%d",col); 
     for(int i = 4; i < row; i++){
         for(int j = 0; j < col; j++){
+            //calculate (x,y) and define intensity
             pcl::PointXYZI point;
-            point.x = (i-4) * range_resolution * cos(j*2*PI/col);
-            point.y = (i-4) * range_resolution * sin(j*2*PI/col);
+            point.x = (i-4) * range_resolution * cos(-j*2*PI/col);
+            point.y = (i-4) * range_resolution * sin(-j*2*PI/col);
             point.z = 0;
             point.intensity = img.at<uchar>(i-4,j);
             // ROS_INFO("x is [%f]",point.x);
             // ROS_INFO("y is [%f]",point.y);
             // ROS_INFO("z is [%f]",point.z);
             // ROS_INFO("i is [%f]",point.intensity);
-            if(point.intensity>70){
-                new_pc->points.push_back (point);
+            if(point.intensity>60){
+                new_pc->points.push_back (point);  //put the info of point to new_pc
             }
-            // new_pc.points[(i-4)*row+j].x = point.x;
-            // new_pc.points[(i-4)*row+j].y = point.y;
-            // new_pc.points[(i-4)*row+j].z = point.z;
-            // new_pc.points[(i-4)*row+j].intensity = point.intensity;
         }
     }
 
@@ -79,7 +76,7 @@ int main(int argc, char** argv)
     ros::NodeHandle nh;
     image_transport::ImageTransport it(nh);
     radar_pub = nh.advertise<sensor_msgs::PointCloud2>("/radar_pc", 1);
-    image_transport::Subscriber sub = it.subscribe("/Navtech/Polar", 1, radarCallback);
+    image_transport::Subscriber sub = it.subscribe("/Navtech/Polar", 1, radarCallback); //data from rosbag
     
     ros::spin();
     return 0;

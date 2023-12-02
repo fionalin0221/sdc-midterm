@@ -36,3 +36,6 @@ target_link_libraries(radar ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRAR
 
 add_executable(visualization src/visualization.cpp)
 target_link_libraries(visualization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+
+add_executable(test1 src/test1.cpp)
+target_link_libraries(test1 ${catkin_LIBRARIES})

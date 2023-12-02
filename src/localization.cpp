@@ -120,12 +120,12 @@ public:
         map_ready = true;
     }
 
-    void radar_pc_callback(const sensor_msgs::PointCloud2::ConstPtr& msg)
+    void radar_pc_callback(const sensor_msgs::PointCloud2::ConstPtr& msg) //msg is get from radar.cpp
     {
         ROS_WARN("Got Radar Pointcloud");
         pcl::PointCloud<pcl::PointXYZI>::Ptr radar_pc(new pcl::PointCloud<pcl::PointXYZI>);
         pcl::PointCloud<pcl::PointXYZI>::Ptr output_pc(new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::fromROSMsg(*msg, *radar_pc);
+        pcl::fromROSMsg(*msg, *radar_pc); //get the number of msg and put into radar_pc
         ROS_INFO("point size: %d", radar_pc->width);
 
         while(!(map_ready && gps_ready))
@@ -144,6 +144,39 @@ public:
         /*TODO : Assign the result to pose_x, pose_y, pose_yaw */
         /*TODO : Use result as next time initial guess */
         
+
+        pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
+        icp.setMaxCorrespondenceDistance (5);
+        icp.setMaximumIterations (100);
+        icp.setTransformationEpsilon (1e-8);
+        icp.setEuclideanFitnessEpsilon (1e-7);
+        icp.setInputSource (radar_pc);
+        icp.setInputTarget (map_pc);
+        Eigen::Matrix4f gauss = Eigen::Matrix4f::Identity();
+        gauss(0,3) = pose_x;
+        gauss(1,3) = pose_y;
+        gauss(0,0) = cos(pose_yaw);
+        gauss(0,1) = -sin(pose_yaw);
+        gauss(1,0) = sin(pose_yaw);
+        gauss(1,1) = cos(pose_yaw);
+        // pcl::PointCloud<pcl::PointXYZI> Final;
+        icp.align (*output_pc, gauss);
+        Eigen::Matrix4f transformation= icp.getFinalTransformation ();
+        // printf ("    | %6.3f %6.3f %6.3f | \n", transformation (0, 0), transformation (0, 1), transformation (0, 2));
+        // printf ("R = | %6.3f %6.3f %6.3f | \n", transformation (1, 0), transformation (1, 1), transformation (1, 2));
+        // printf ("    | %6.3f %6.3f %6.3f | \n", transformation (2, 0), transformation (2, 1), transformation (2, 2));
+        // printf ("t = < %6.3f, %6.3f, %6.3f >\n\n", transformation (0, 3), transformation (1, 3), transformation (2, 3));
+        pose_x = transformation(0,3);
+        pose_y = transformation(1,3);
+        Eigen::Matrix3f R;
+        for(int i = 0; i < 3; i++){
+            for(int j = 0; j < 3; j++){
+                R(i,j) = transformation(i,j);
+            }
+        }
+        Eigen::Vector3f euler_angles = R.eulerAngles(0, 1, 2); 
+        pose_yaw = euler_angles[2];
+            
         tf_brocaster(pose_x, pose_y, pose_yaw);
         radar_pose_publisher(pose_x, pose_y, pose_yaw);
 
