@@ -39,3 +39,9 @@ target_link_libraries(visualization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenC
 
 add_executable(test1 src/test1.cpp)
 target_link_libraries(test1 ${catkin_LIBRARIES})
+
+add_executable(localization_copy src/localization_copy.cpp)
+target_link_libraries(localization_copy ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+
+add_executable(localization_copy_2 src/localization_copy_2.cpp)
+target_link_libraries(localization_copy_2 ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})

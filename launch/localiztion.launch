@@ -8,7 +8,11 @@
 
     <node pkg="localization" type="map_pub" name="map_punlisher" output="screen"/>
     <node pkg="localization" type="radar" name="radar_subscriber" output="screen"/>
-    <node pkg="localization" type="localization" name="localizer" output="screen"/>
+    <node pkg="localization" type="localization_copy" name="localizer" output="screen">
+        <param name="EKF_position_gain" type="double" value="0.002"/>
+        <param name="EKF_velocity_gain" type="double" value="0.003"/>
+    </node>
+    <!-- <node pkg="localization" type="localization_copy_2" name="localizer" output="screen"/> -->
     
     <arg name="bags" default="
         $(find localization)/data/sdc_track1.bag
@@ -18,7 +22,7 @@
         args="
         --clock
         --pause
-        -r 0.1
+        -r 0.15
         --bags $(arg bags)
     "/>
 </launch>

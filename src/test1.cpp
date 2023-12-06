@@ -1,4 +1,25 @@
-#include<ros/ros.h>
+#include <string>
+#include <fstream>
+#include <iostream>
+#include <cmath>
+
+#include <ros/ros.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl/point_cloud.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/registration/icp.h>
+#include <pcl_ros/transforms.h>
+
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
+#include <geometry_msgs/PointStamped.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <nav_msgs/Path.h>
 
 class A{
 public:
@@ -54,6 +75,23 @@ int main(int argc, char** argv){
  
     // a.print();
     test();
+    
+    Eigen::Matrix3f A = Eigen::Matrix3f::Identity();
+    Eigen::Matrix3f B = Eigen::Matrix3f::Identity();
+    Eigen::MatrixXf temp_pose(3,1);
+    Eigen::MatrixXf u(3,1);
+    temp_pose(0,0) = 1;
+    temp_pose(1,0) = 1;
+    temp_pose(2,0) = 0;
+     
+    u(0,0) = 2;
+    u(1,0) = 1;
+    u(2,0) = 1;
+
+    temp_pose = A * temp_pose + B * u;
+    ROS_INFO("%f,%f,%f",temp_pose(0,0),temp_pose(1,0),temp_pose(2,0));
+
+    
 
     return 0;
 }

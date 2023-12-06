@@ -26,6 +26,7 @@ class Localizer
 {
 private:
     ros::NodeHandle _nh;
+    ros::NodeHandle _nh_local;
 
     ros::Subscriber radar_pc_sub;
     ros::Subscriber map_sub;
@@ -56,25 +57,30 @@ private:
     float correspond;
 
     Eigen::Matrix4f init_guess;
-    Eigen::Matrix<double, 3, 3> A;
-    Eigen::Matrix<double, 3, 3> B;
-    Eigen::Matrix<double, 2, 3> C;
-
-    Eigen::Matrix<double, 3, 3> S;
-    Eigen::Matrix<double, 3, 3> R;
-    Eigen::Matrix<double, 2, 2> Q;
-    Eigen::Matrix<double, 3, 1> temp_pose;
-    Eigen::Matrix<double, 3, 1> u;
-    Eigen::Matrix<double, 2, 1> z;
-    Eigen::Matrix<double, 3, 2> K;
-    Eigen::Matrix<double, 3, 3> I;
-    float pre_pose_x = 0;
-    float pre_pose_y = 0;
-    float pre_pose_yaw = 0;
+    Eigen::Matrix<double, 4, 4> A;
+    Eigen::Matrix<double, 4, 4> C;
+    Eigen::Matrix<double, 4, 4> S;
+    Eigen::Matrix<double, 4, 4> R;
+    Eigen::Matrix<double, 4, 4> Q;
+    Eigen::Matrix<double, 4, 1> temp_pose;
+    Eigen::Matrix<double, 4, 1> z;
+    Eigen::Matrix<double, 4, 4> K;
+    Eigen::Matrix<double, 4, 4> I;
+    float pre_EKF_x = 0;
+    float pre_EKF_y = 0;
+    float pre_ICP_x = 0.0;
+    float pre_ICP_y = 0.0;
+    float temp_ICP_x = 0;
+    float temp_ICP_y = 0;
+    float vx = 0.0;
+    float vy = 0.0;
 
     bool map_ready = false;
     bool gps_ready = false;
     bool initialized = false;
+
+    double position_gain = 0.01;
+    double velocity_gain = 0.05;
 
 public:
     Localizer(ros::NodeHandle nh) : map_pc(new pcl::PointCloud<pcl::PointXYZI>)
@@ -84,6 +90,7 @@ public:
         
         _nh = nh;
         _nh.param<string>("/save_path", save_path, "/Default/path");
+        // ROS_INFO("%f",position_gain);
 
         init_guess.setIdentity();
         file.open(save_path);
@@ -97,13 +104,36 @@ public:
         radar_pose_pub = _nh.advertise<geometry_msgs::PoseStamped>("/tranformed_radar_pose", 1);
         path_pub = _nh.advertise<nav_msgs::Path>("/localization_path", 1);
 
-        A << 1,0,0,0,1,0,0,0,1;
-        B << 1,0,0,0,1,0,0,0,1;
-        C << 1,0,0,0,1,0;
-        S << 1,0,0,0,1,0,0,0,1;
-        R << 1,0,0,0,1,0,0,0,1;
-        Q << 1e5,0,0,1e5;
-        I << 1,0,0,0,1,0,0,0,1;
+        A << 1,0,1,0,
+             0,1,0,1,
+             0,0,1,0,
+             0,0,0,1;
+
+        C << 1,0,0,0,
+             0,1,0,0,
+             0,0,1,0,
+             0,0,0,1;
+
+        S << 1,0,0,0,
+             0,1,0,0,
+             0,0,1,0,
+             0,0,0,1;
+
+        R << 1,0,0,0,
+             0,1,0,0,
+             0,0,10,0,
+             0,0,0,10;
+
+        Q << position_gain,0,0,0,
+             0,position_gain,0,0,
+             0,0,velocity_gain,0,
+             0,0,0,velocity_gain;
+             0,0,0,velocity_gain;
+
+        I << 1,0,0,0,
+             0,1,0,0,
+             0,0,1,0,
+             0,0,0,1;
     }
 
     ~Localizer()
@@ -191,6 +221,8 @@ public:
         
         pose_x = transformation(0,3);
         pose_y = transformation(1,3);
+        temp_ICP_x = transformation(0,3);
+        temp_ICP_y = transformation(1,3);
         Eigen::Matrix3f Rotation;
         for(int i = 0; i < 3; i++){
             for(int j = 0; j < 3; j++){
@@ -202,32 +234,69 @@ public:
 
         ROS_INFO("original:%f,%f,%f",pose_x,pose_y,pose_yaw);
         
-        temp_pose(0,0) = pre_pose_x;
-        temp_pose(1,0) = pre_pose_y;
-        temp_pose(2,0) = pre_pose_yaw;
-        
-        u(0,0) = pose_x - pre_pose_x;
-        u(1,0) = pose_y - pre_pose_y;
-        u(2,0) = pose_yaw - pre_pose_yaw;
-        
-        pre_pose_x = pose_x;
-        pre_pose_y = pose_y;
-        pre_pose_yaw = pose_yaw;
+        temp_pose(0,0) = pre_EKF_x;
+        temp_pose(1,0) = pre_EKF_y;
+        temp_pose(2,0) = vx;
+        temp_pose(3,0) = vy;
 
-        z(0,0) = gps_x;
-        z(1,0) = gps_y;
-        
-        temp_pose = A * temp_pose + B * u;
-        S = A * S * A.transpose() + R;
-        pose_yaw = temp_pose(2,0);
+        z(0,0) = pose_x;
+        z(1,0) = pose_y;
+        if(seq == 0){
+            z(2,0) = 0;
+            z(3,0) = 0;
+        }else{
+            z(2,0) = pose_x - pre_ICP_x;
+            z(3,0) = pose_y - pre_ICP_y;
+        }
+
+        if(seq >= 15 && seq < 25){
+            position_gain *= 2.5;
+            velocity_gain *= 2.5;
+            Q << position_gain,0,0,0,
+                 0,position_gain,0,0,
+                 0,0,velocity_gain,0,
+                 0,0,0,velocity_gain;
+                 0,0,0,velocity_gain;
+            ROS_INFO("position_gain:%f",Q(0,0));
+            ROS_INFO("velocity_gain:%f",Q(2,2));
+        }
+        if(seq >= 50 && seq < 60){
+            position_gain /= 2.5;
+            velocity_gain /= 2.5;
+            Q << position_gain,0,0,0,
+                 0,position_gain,0,0,
+                 0,0,velocity_gain,0,
+                 0,0,0,velocity_gain;
+                 0,0,0,velocity_gain;
+            ROS_INFO("position_gain:%f",Q(0,0));
+            ROS_INFO("velocity_gain:%f",Q(2,2));
+        }
+
+        //predict
+        temp_pose = A * temp_pose;
+        S = A * S * A.transpose() + R ;
+
+        //update
         K = S * C.transpose() * (( C * S * C.transpose() + Q).inverse());
         temp_pose = temp_pose + K * ( z - C * temp_pose);
         S = (I - K * C) * S;
+        // ROS_INFO(" :%f,%f,%f,%f",K(0,0),K(0,1),K(0,2),K(0,3));
+        // ROS_INFO("K:%f,%f,%f,%f",K(1,0),K(1,1),K(1,2),K(1,3));
+        // ROS_INFO(" :%f,%f,%f,%f",K(2,0),K(2,1),K(2,2),K(2,3));
+        // ROS_INFO(" :%f,%f,%f,%f",K(3,0),K(3,1),K(3,2),K(3,3));
+
         pose_x = temp_pose(0,0);
         pose_y = temp_pose(1,0);
-        ROS_INFO("after kalman filter:%f,%f,%f",pose_x,pose_y,pose_yaw);
-        
-            
+        ROS_INFO("after kalman filter of copy:%f,%f,%f",pose_x,pose_y,pose_yaw);
+        ROS_INFO("velocity:%f,%f",vx,vy);
+
+        pre_EKF_x = temp_pose(0,0);
+        pre_EKF_y = temp_pose(1,0);
+        vx = temp_pose(2,0);
+        vy = temp_pose(3,0);
+        pre_ICP_x = temp_ICP_x;
+        pre_ICP_y = temp_ICP_y;
+
         tf_brocaster(pose_x, pose_y, pose_yaw);
         radar_pose_publisher(pose_x, pose_y, pose_yaw);
 
