@@ -45,3 +45,6 @@ target_link_libraries(localization_copy ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${O
 
 add_executable(localization_copy_2 src/localization_copy_2.cpp)
 target_link_libraries(localization_copy_2 ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+
+add_executable(yanting src/yanting.cpp)
+target_link_libraries(yanting ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})

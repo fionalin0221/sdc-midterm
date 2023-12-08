@@ -66,12 +66,13 @@ private:
     Eigen::Matrix<double, 4, 1> z;
     Eigen::Matrix<double, 4, 4> K;
     Eigen::Matrix<double, 4, 4> I;
-    float pre_EKF_x = 0;
-    float pre_EKF_y = 0;
+    // float pre_EKF_x = 0;
+    // float pre_EKF_y = 0;
     float pre_ICP_x = 0.0;
     float pre_ICP_y = 0.0;
-    float temp_ICP_x = 0;
-    float temp_ICP_y = 0;
+    float pre_ICP_yaw = 0;
+    // float temp_ICP_x = 0;
+    // float temp_ICP_y = 0;
     float vx = 0.0;
     float vy = 0.0;
 
@@ -121,13 +122,12 @@ public:
 
         R << 1,0,0,0,
              0,1,0,0,
-             0,0,10,0,
-             0,0,0,10;
+             0,0,1,0,
+             0,0,0,1;
 
         Q << position_gain,0,0,0,
              0,position_gain,0,0,
              0,0,velocity_gain,0,
-             0,0,0,velocity_gain;
              0,0,0,velocity_gain;
 
         I << 1,0,0,0,
@@ -199,19 +199,20 @@ public:
         
 
         pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
-        icp.setMaxCorrespondenceDistance (5);
-        icp.setMaximumIterations (100);
+        icp.setMaxCorrespondenceDistance (2);
+        icp.setMaximumIterations (500);
         icp.setTransformationEpsilon (1e-8);
-        icp.setEuclideanFitnessEpsilon (1e-7);
+        icp.setEuclideanFitnessEpsilon (1e-8);
         icp.setInputSource (radar_pc);
         icp.setInputTarget (map_pc);
         Eigen::Matrix4f gauss = Eigen::Matrix4f::Identity();
         gauss(0,3) = pose_x;
         gauss(1,3) = pose_y;
-        gauss(0,0) = cos(pose_yaw);
-        gauss(0,1) = -sin(pose_yaw);
-        gauss(1,0) = sin(pose_yaw);
-        gauss(1,1) = cos(pose_yaw);
+        gauss.block<2, 2>(0,0) << cos(pose_yaw), -sin(pose_yaw), sin(pose_yaw),cos(pose_yaw);
+        // gauss(0,0) = cos(pose_yaw);
+        // gauss(0,1) = -sin(pose_yaw);
+        // gauss(1,0) = sin(pose_yaw);
+        // gauss(1,1) = cos(pose_yaw);
         icp.align (*output_pc, gauss);
         Eigen::Matrix4f transformation = icp.getFinalTransformation ();
         // printf ("    | %6.3f %6.3f %6.3f | \n", transformation (0, 0), transformation (0, 1), transformation (0, 2));
@@ -221,8 +222,8 @@ public:
         
         pose_x = transformation(0,3);
         pose_y = transformation(1,3);
-        temp_ICP_x = transformation(0,3);
-        temp_ICP_y = transformation(1,3);
+        // temp_ICP_x = transformation(0,3);
+        // temp_ICP_y = transformation(1,3);
         Eigen::Matrix3f Rotation;
         for(int i = 0; i < 3; i++){
             for(int j = 0; j < 3; j++){
@@ -234,68 +235,70 @@ public:
 
         ROS_INFO("original:%f,%f,%f",pose_x,pose_y,pose_yaw);
         
-        temp_pose(0,0) = pre_EKF_x;
-        temp_pose(1,0) = pre_EKF_y;
-        temp_pose(2,0) = vx;
-        temp_pose(3,0) = vy;
-
-        z(0,0) = pose_x;
-        z(1,0) = pose_y;
         if(seq == 0){
-            z(2,0) = 0;
-            z(3,0) = 0;
+            temp_pose(0,0) = pose_x;
+            temp_pose(1,0) = pose_y;
+            temp_pose(2,0) = 0;
+            temp_pose(3,0) = 0;
+            pre_ICP_x = pose_x;
+            pre_ICP_y = pose_y;
+            ROS_INFO("no pass kalman filter:%f,%f,%f",pose_x,pose_y,pose_yaw);
         }else{
+            z(0,0) = pose_x;
+            z(1,0) = pose_y;
             z(2,0) = pose_x - pre_ICP_x;
             z(3,0) = pose_y - pre_ICP_y;
+            //low pass filter
+            // float filter_pose = 0.8;
+            // float filter_yaw = 0.1;
+            // if(seq >= 95 && seq <= 105){
+            //     pose_x = pose_x * filter_pose + pre_ICP_x * (1-filter_pose);
+            //     pose_y = pose_y * filter_pose + pre_ICP_y * (1-filter_pose);
+            //     pose_yaw = pose_yaw * filter_yaw + pre_ICP_yaw * (1-filter_yaw);
+            // }
+            // pre_ICP_x = pose_x;
+            // pre_ICP_y = pose_y;
+            // pre_ICP_yaw = pose_yaw;
+            if(seq >= 15 && seq < 25){
+                position_gain *= 2.5;
+                velocity_gain *= 2.5;
+                Q << position_gain,0,0,0,
+                     0,position_gain,0,0,
+                     0,0,velocity_gain,0,
+                     0,0,0,velocity_gain;
+                ROS_INFO("position_gain:%f",Q(0,0));
+                ROS_INFO("velocity_gain:%f",Q(2,2));
+            }
+            if(seq >= 50 && seq < 60){
+                position_gain /= 2.5;
+                velocity_gain /= 2.5;
+                Q << position_gain,0,0,0,
+                     0,position_gain,0,0,
+                     0,0,velocity_gain,0,
+                     0,0,0,velocity_gain;
+                ROS_INFO("position_gain:%f",Q(0,0));
+                ROS_INFO("velocity_gain:%f",Q(2,2));
+            }
+
+    
+            //predict
+            temp_pose = A * temp_pose;
+            S = A * S * A.transpose() + R ;
+            //update
+            K = S * C.transpose() * (( C * S * C.transpose() + Q).inverse());
+            temp_pose = temp_pose + K * ( z - C * temp_pose);
+            S = (I - K * C) * S;
+            pose_x = temp_pose(0,0);
+            pose_y = temp_pose(1,0);
+            vx = temp_pose(2,0);
+            vy = temp_pose(3,0);
+            ROS_INFO("after kalman filter of copy:%f,%f,%f",pose_x,pose_y,pose_yaw);
+            ROS_INFO("velocity:%f,%f",vx,vy);
         }
 
-        if(seq >= 15 && seq < 25){
-            position_gain *= 2.5;
-            velocity_gain *= 2.5;
-            Q << position_gain,0,0,0,
-                 0,position_gain,0,0,
-                 0,0,velocity_gain,0,
-                 0,0,0,velocity_gain;
-                 0,0,0,velocity_gain;
-            ROS_INFO("position_gain:%f",Q(0,0));
-            ROS_INFO("velocity_gain:%f",Q(2,2));
-        }
-        if(seq >= 50 && seq < 60){
-            position_gain /= 2.5;
-            velocity_gain /= 2.5;
-            Q << position_gain,0,0,0,
-                 0,position_gain,0,0,
-                 0,0,velocity_gain,0,
-                 0,0,0,velocity_gain;
-                 0,0,0,velocity_gain;
-            ROS_INFO("position_gain:%f",Q(0,0));
-            ROS_INFO("velocity_gain:%f",Q(2,2));
-        }
+ 
 
-        //predict
-        temp_pose = A * temp_pose;
-        S = A * S * A.transpose() + R ;
 
-        //update
-        K = S * C.transpose() * (( C * S * C.transpose() + Q).inverse());
-        temp_pose = temp_pose + K * ( z - C * temp_pose);
-        S = (I - K * C) * S;
-        // ROS_INFO(" :%f,%f,%f,%f",K(0,0),K(0,1),K(0,2),K(0,3));
-        // ROS_INFO("K:%f,%f,%f,%f",K(1,0),K(1,1),K(1,2),K(1,3));
-        // ROS_INFO(" :%f,%f,%f,%f",K(2,0),K(2,1),K(2,2),K(2,3));
-        // ROS_INFO(" :%f,%f,%f,%f",K(3,0),K(3,1),K(3,2),K(3,3));
-
-        pose_x = temp_pose(0,0);
-        pose_y = temp_pose(1,0);
-        ROS_INFO("after kalman filter of copy:%f,%f,%f",pose_x,pose_y,pose_yaw);
-        ROS_INFO("velocity:%f,%f",vx,vy);
-
-        pre_EKF_x = temp_pose(0,0);
-        pre_EKF_y = temp_pose(1,0);
-        vx = temp_pose(2,0);
-        vy = temp_pose(3,0);
-        pre_ICP_x = temp_ICP_x;
-        pre_ICP_y = temp_ICP_y;
 
         tf_brocaster(pose_x, pose_y, pose_yaw);
         radar_pose_publisher(pose_x, pose_y, pose_yaw);
